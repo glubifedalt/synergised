@@ -1,0 +1,70 @@
+name: Build Windows EXE
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:      # lets you trigger a build manually from the GitHub website
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      # ── 1. Get the code ────────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── 2. Set up Python ───────────────────────────────────────────────
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # ── 3. Cache pip packages (makes repeat builds faster) ─────────────
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~\AppData\Local\pip\Cache
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      # ── 4. Install Python dependencies ─────────────────────────────────
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller>=6.0
+
+      # ── 5. Install Tesseract OCR (for timetable teacher detection) ─────
+      - name: Install Tesseract OCR
+        run: |
+          choco install tesseract --no-progress -y
+          echo "C:\Program Files\Tesseract-OCR" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+        shell: powershell
+
+      # ── 6. Build the EXE ───────────────────────────────────────────────
+      - name: Build with PyInstaller
+        run: |
+          python -m PyInstaller synergy_tool.spec --noconfirm --clean
+        working-directory: ${{ github.workspace }}
+
+      # ── 7. Verify the output exists ────────────────────────────────────
+      - name: Verify build output
+        run: |
+          if (Test-Path "dist\SynergyDashboard.exe") {
+            $size = (Get-Item "dist\SynergyDashboard.exe").length / 1MB
+            Write-Host "✅ SynergyDashboard.exe built successfully ($([math]::Round($size,1)) MB)"
+          } else {
+            Write-Host "❌ Build failed - exe not found"
+            exit 1
+          }
+        shell: powershell
+
+      # ── 8. Upload as a downloadable artifact ──────────────────────────
+      - name: Upload EXE artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SynergyDashboard-Windows
+          path: dist\SynergyDashboard.exe
+          retention-days: 30      # available to download for 30 days
